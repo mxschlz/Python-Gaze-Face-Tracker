@@ -185,11 +185,8 @@ Calibration:
 # Logic for identifying trials and classifying the user's gaze during those trials.
 #--------------------------------------------------------------------------------------
 Trials:
-  # Master switch for the entire trial detection and classification system.
   ENABLE: True
 
-  # --- Trial Onset Detection (via screen brightness) ---
-  # Method for defining the stimulus ROI.
   # "static": Manually define the coordinates below.
   # "dynamic": (NEW) Automatically find the ROI at the start of the video.
   # DISABLED: Set to null or comment out to disable ROI detection.
@@ -204,7 +201,7 @@ Trials:
     # Set this to just before you expect the first stimulus to appear.
     SEARCH_START_SECONDS: 300 # Example: Start search at 3 minutes
     # Duration (in seconds) at the start of the video to search for the active region.
-    SEARCH_DURATION_SECONDS: 30
+    SEARCH_DURATION_SECONDS: 60
     # How many rows and columns to divide the screen into for analysis.
     # More divisions are more precise but use more memory. [columns, rows]
     GRID_DIVISIONS: [30, 25]
@@ -212,11 +209,12 @@ Trials:
     # This is a percentage of the most active cell's variance.
     # Lower values (e.g., 25) create a larger, more inclusive ROI.
     # Higher values (e.g., 50) create a tighter, more focused ROI.
-    ACTIVITY_THRESHOLD_PERCENT: 15
+    ACTIVITY_THRESHOLD_PERCENT: 50
     # (Optional) You can provide a search area [x, y, w, h] to constrain the search
     # and prevent finding spurious activity in irrelevant parts of the screen.
     # If commented out, the whole screen is used.
-    SEARCH_AREA: [1040, 300, 320, 450]
+    # The ROI is generally in the lower half of the video, centrally.
+    SEARCH_AREA: [320, 400, 1280, 680]
     MorphologicalCleaning:
       ENABLE_CLEANING: True
       # How many pixels to erode (remove noise). Range: 1-5.
@@ -233,12 +231,12 @@ Trials:
       # Padding to add, as a percentage of the detected ROI's width and height.
       # A value of 20 means the final ROI will be 20% wider and 20% taller.
       # This is generally more robust than using fixed pixel padding.
-      PADDING_PERCENTAGE: 40
+      PADDING_PERCENTAGE: 0
 
   # (Used if STIMULUS_ROI_METHOD is "static")
   # Defines the Region of Interest [x, y, width, height] on the video frame to monitor for a stimulus.
   STIMULUS_ROI_COORDS: [1060, 340, 280, 400]
-  TRIAL_ONSET_DETECTION_METHOD: "temporal_difference"
+  TRIAL_ONSET_DETECTION_METHOD: "template"
 
   # -- Parameters for "temporal_difference" method --
   TemporalDifference:
