@@ -214,7 +214,7 @@ Trials:
     # and prevent finding spurious activity in irrelevant parts of the screen.
     # If commented out, the whole screen is used.
     # The ROI is generally in the lower half of the video, centrally.
-    SEARCH_AREA: [320, 400, 1280, 680]
+    SEARCH_AREA: [640, 720, 640, 360]
     MorphologicalCleaning:
       ENABLE_CLEANING: True
       # How many pixels to erode (remove noise). Range: 1-5.
