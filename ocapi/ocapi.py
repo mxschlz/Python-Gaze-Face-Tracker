@@ -1495,6 +1495,47 @@ class Ocapi(object):
 
 		return labels
 
+	def _build_negative_template(self):
+		if getattr(self, 'negative_template', None) is not None:
+			return True
+		self.logger.info("Building negative template (baseline) from the first few frames...")
+		
+		# Build negative template
+		baseline_frames = []
+		x, y, w, h = self.STIMULUS_ROI_COORDS
+		x, y = max(0, x), max(0, y)
+		
+		# Read first 10 frames to compute a solid baseline
+		for _ in range(10):
+			ret, frame = self.cap.read()
+			if not ret: break
+			img_h, img_w = frame.shape[:2]
+			center_h = int(h * 0.80)
+			cy = y + int((h - center_h) / 2)
+			roi_x2, roi_y2 = min(img_w, x + w), min(img_h, cy + center_h)
+			if roi_x2 > x and roi_y2 > cy:
+				stimulus_roi = frame[cy:roi_y2, x:roi_x2]
+				gray = cv.cvtColor(stimulus_roi, cv.COLOR_BGR2GRAY)
+				gray = cv.resize(gray, (32, 32), interpolation=cv.INTER_AREA).astype(np.float32)
+				baseline_frames.append(gray)
+
+		if not baseline_frames:
+			self.logger.error("Could not read enough frames for baseline.")
+			return False
+
+		self.negative_template = np.median(baseline_frames, axis=0).astype(np.uint8)
+		means = [np.mean(frame) for frame in baseline_frames]
+		self.roi_baseline_mean = float(np.mean(means))
+		self.roi_baseline_std_dev = float(np.std(means)) if len(means) > 1 else 0.5
+		if self.roi_baseline_std_dev < 0.5:
+			self.roi_baseline_std_dev = 0.5
+		self.logger.info(f"Built negative template from {len(baseline_frames)} frames. Baseline mean: {self.roi_baseline_mean:.2f}")
+		
+		# Reset capture
+		self.cap.release()
+		self.cap = self.init_video_input()
+		return True
+
 	def find_first_stimulus_onset(self):
 		self.in_stimulus_onset_search = True
 		"""
@@ -1509,99 +1550,39 @@ class Ocapi(object):
 			self.logger.error("`ENABLE_VIDEO_TRIAL_DETECTION` must be true in config to find stimulus onset.")
 			return None, None
 
-		# --- NEW: Perform Clustering Calibration if configured, just like the main run() method ---
-		# This ensures that if the main analysis relies on a calibrated pose, the same
-		# calibration is available and consistent from the very beginning.
-		if self.CALIBRATION_METHOD == 'clustering':
-			self.logger.info("--- Running Clustering Calibration as part of stimulus onset search ---")
-			if not self._execute_calibration_pass():
-				self.logger.error("Clustering calibration failed during stimulus search. Aborting.")
-				self._cleanup(finalize_data=False)
-				return None, None
-			# CRITICAL FIX: The calibration pass releases the video capture.
-			# We must re-initialize it before the next step.
-			self.logger.info("Re-initializing video capture after calibration pass...")
-			self.cap = self.init_video_input()
-
-		# --- NEW: Perform Dynamic ROI search if configured, just like the main run() method ---
-		# This ensures the ROI used for finding the first stimulus is the same one used for the full analysis.
 		if getattr(self, 'STIMULUS_ROI_METHOD', 'static') == 'dynamic':
 			self.logger.info("--- Running Dynamic ROI Detection for stimulus onset search ---")
 			if not self._find_dynamic_roi():
 				self.logger.error("Dynamic ROI detection failed during stimulus search. Aborting.")
-				self._cleanup(finalize_data=False)
 				return None, None
 
-		self.logger.info("--- Starting Fast Pass: Searching for first stimulus onset ---")
-		self._reset_analysis_state()  # Ensure a clean state
+		self._reset_analysis_state()
+		
+		if not self._build_negative_template():
+			return None, None
 
+		self.logger.info("--- Starting Fast Pass: Searching for first stimulus onset from frame 0 ---")
+		
 		frame_count = -1
 		try:
 			while self.cap.isOpened():
 				frame_count += 1
-				frame, img_h, img_w, ret = self._get_and_preprocess_frame()
-				if not ret:
-					self.logger.warning("Video ended before any stimulus was detected.")
-					return None, None
+				ret, frame = self.cap.read()
+				if not ret: break
 
 				current_frame_time_ms = int(frame_count * (1000.0 / self.FPS))
+				img_h, img_w = frame.shape[:2]
+				
+				# Compare current frame to negative baseline template
+				mean_diff = self._calculate_roi_difference(frame, img_h, img_w)
+				
+				# 15.0 is a solid threshold for deviation from baseline
+				if mean_diff > 15.0:
+					self.logger.info(f"TRUE first video trial detected at {current_frame_time_ms}ms (Mean Diff: {mean_diff:.2f}).")
+					return frame_count, current_frame_time_ms
 
-				# --- Simplified Trial Detection Logic ---
-				self.current_roi_brightness = self._calculate_roi_brightness(frame, img_h, img_w)
-				self.current_roi_difference = self._calculate_roi_difference(frame, img_h, img_w)
-
-				# 1. Collect baseline
-				if self.roi_baseline_mean is None:
-					if current_frame_time_ms < getattr(self, "ROI_BASELINE_START_TIME_MS", 30000):
-						continue  # Skip until start time to let calibration end
-					if len(self.roi_brightness_samples) < self.ROI_BRIGHTNESS_BASELINE_FRAMES:
-						self.roi_brightness_samples.append(self.current_roi_brightness)
-						if hasattr(self, 'current_roi_difference'):
-							self.roi_difference_samples.append(self.current_roi_difference)
-					else:
-						# Calculate baseline using 15th percentile to robustly find the background gray level
-						self.roi_baseline_mean = float(np.percentile(self.roi_brightness_samples, 15))
-						# (!!!) CRITICAL SAFETY: Fall back to safe default of 96.15 if calculated baseline is too high
-						if self.roi_baseline_mean > 102.0:
-							self.logger.warning(f"Calculated baseline mean ({self.roi_baseline_mean:.2f}) was too high (likely calibration active). Falling back to safe default of 96.15.")
-							self.roi_baseline_mean = 96.15
-						
-						# Calculate standard deviation on background frames (below median)
-						median_val = np.median(self.roi_brightness_samples)
-						bg_samples = [x for x in self.roi_brightness_samples if x <= median_val]
-						self.roi_baseline_std_dev = float(np.std(bg_samples)) if bg_samples else 0.5
-						if self.roi_baseline_std_dev < 0.5:
-							self.roi_baseline_std_dev = 0.5
-						
-						if self.roi_difference_samples:
-							self.roi_difference_baseline_mean = float(np.percentile(self.roi_difference_samples, 15))
-							if self.roi_difference_baseline_mean > 0.5:
-								self.roi_difference_baseline_mean = 0.1
-							median_diff = np.median(self.roi_difference_samples)
-							bg_diff_samples = [x for x in self.roi_difference_samples if x <= median_diff]
-							self.roi_difference_baseline_std = float(np.std(bg_diff_samples)) if bg_diff_samples else 0.02
-							if self.roi_difference_baseline_std < 0.02:
-								self.roi_difference_baseline_std = 0.02
-						else:
-							self.roi_difference_baseline_mean = 0.0
-							self.roi_difference_baseline_std = 0.02
-							
-						if self.PRINT_DATA:
-							self.logger.info(f"ROI Baseline Calculated: Mean={self.roi_baseline_mean:.2f}, SD={self.roi_baseline_std_dev:.2f}")
-					continue # Continue to next frame while collecting baseline
-
-				# 2. Feed frame to the trial state machine to detect and validate trial onset
-				self._update_trial_state(current_frame_time_ms)
-				self._end_active_trial_if_needed(current_frame_time_ms)
-
-				# 3. If a valid, non-discarded trial is finalized, we found our true first stimulus onset!
-				if self.all_trials_summary:
-					first_valid_trial = self.all_trials_summary[0]
-					first_valid_onset_ms = first_valid_trial['start_time_ms']
-					first_valid_frame = int(first_valid_onset_ms / (1000.0 / self.FPS))
-					self.logger.info(f"--- First valid stimulus detected at frame {first_valid_frame} ({first_valid_onset_ms} ms) ---")
-					return first_valid_frame, first_valid_onset_ms
-
+			self.logger.warning("Could not find any frame deviating from the negative template!")
+			return None, None
 		finally:
 			# --- MODIFICATION ---
 			# Instead of tearing down, reset the video to the beginning and clear
@@ -1647,12 +1628,16 @@ class Ocapi(object):
 			# Downsample to 32x32 to filter out high-frequency compression/camera noise
 			resized = cv.resize(gray_stimulus_roi, (32, 32), interpolation=cv.INTER_AREA)
 			
-			if self.prev_gray_roi is None or self.prev_gray_roi.shape != resized.shape:
+			if getattr(self, 'negative_template', None) is not None:
+				diff_frame = cv.absdiff(resized, self.negative_template)
+				return np.mean(diff_frame)
+			else:
+				if self.prev_gray_roi is None or self.prev_gray_roi.shape != resized.shape:
+					self.prev_gray_roi = resized
+					return 0.0
+				diff_frame = cv.absdiff(resized, self.prev_gray_roi)
 				self.prev_gray_roi = resized
-				return 0.0
-			diff_frame = cv.absdiff(resized, self.prev_gray_roi)
-			self.prev_gray_roi = resized
-			return np.mean(diff_frame)
+				return np.mean(diff_frame)
 		return 0.0
 
 	def _update_trial_state(self, current_frame_time_ms):
@@ -1714,7 +1699,14 @@ class Ocapi(object):
 
 		# --- 2. Trial Onset Detection (Rolling average difference of means) ---
 		stimulus_detected = False
-		if self.roi_baseline_mean is not None:
+		if getattr(self, 'negative_template', None) is not None:
+			if not getattr(self, 'waiting_for_dark', False) and self.current_roi_difference > 15.0:
+				stimulus_detected = True
+				self.current_trial_baseline_brightness = self.roi_baseline_mean if self.roi_baseline_mean is not None else 0.0
+			
+			if self.current_roi_difference < 5.0:
+				self.waiting_for_dark = False
+		elif self.roi_baseline_mean is not None:
 			# Initialize sliding history of ROI brightness
 			if not hasattr(self, 'roi_brightness_history'):
 				from collections import deque
@@ -2749,6 +2741,10 @@ class Ocapi(object):
 			else:
 				self.logger.info("--- Starting Single-Pass Analysis ---")
 
+		# --- Build Negative Template for trial detection ---
+		if self.ENABLE_VIDEO_TRIAL_DETECTION:
+			self._build_negative_template()
+
 		self.logger.info("="*50)
 		# =================================================================================
 		# --- Main Analysis Loop ---
@@ -2827,8 +2823,10 @@ class Ocapi(object):
 				if self.LOG_DATA:
 					self._log_frame_data(current_frame_time_ms, self.frame_count, landmarks, img_w, img_h)
 
-				if self.SHOW_ON_SCREEN_DATA:
+				if self.SHOW_ON_SCREEN_DATA or getattr(self, 'out', None) is not None:
 					self._draw_on_screen_data(frame, landmarks, img_h, img_w, current_frame_time_ms)
+				
+				if self.SHOW_ON_SCREEN_DATA:
 					cv.imshow("Eye Tracking", frame)
 
 				self._write_video_frame(frame)
