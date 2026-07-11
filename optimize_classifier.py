@@ -26,8 +26,8 @@ from sklearn.metrics import cohen_kappa_score, accuracy_score
 import random
 
 project_root = os.path.dirname(os.path.abspath(__file__))
-rater1_dir = "/home/max/Insync/schulz.max5@gmail.com/GoogleDrive/PhD/data/OCAPI/output/human_coding/rater_1"
-rater2_dir = "/home/max/Insync/schulz.max5@gmail.com/GoogleDrive/PhD/data/OCAPI/output/human_coding/rater_2"
+rater1_dir = "/home/maxschulz/IPSY1-Storage/Projects/ac/Experiments/running_studies/OCAPI/output/human_coding/rater_1"
+rater2_dir = "/home/maxschulz/IPSY1-Storage/Projects/ac/Experiments/running_studies/OCAPI/output/human_coding/rater_2"
 log_dir = os.path.join(project_root, "validation_logs")
 
 def discover_subjects():
@@ -294,7 +294,10 @@ def main():
                 latency_offset_ms=offset,
                 stim_duration_ms=cfg["stim_duration_ms"]
             )
-            n = min(len(raw_X), len(all_y_r1[subj]))
+            n_r1 = len(all_y_r1[subj])
+            n_r2 = len(all_y_r2[subj]) if all_y_r2[subj] is not None else n_r1
+            n = min(len(raw_X), n_r1, n_r2)
+            
             raw_features[offset][subj] = raw_X[:n]
             # align labels
             all_y_r1[subj] = all_y_r1[subj][:n]
@@ -327,10 +330,10 @@ def main():
     max_depth_opts = [6, 8, 10, 12, 15, None]
     min_samples_leaf_opts = [1, 2, 4, 6]
     max_features_opts = ['sqrt', 'log2', None]
-    class_weight_opts = [None, 'balanced']
+    class_weight_opts = ['balanced']
     oversample_opts = [True, False]
     target_opts = ['consensus', 'rater1']
-    threshold_opts = [0.30, 0.35, 0.40, 0.45, 0.50, 0.55, 0.60]
+    threshold_opts = [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95]
     
     # Generate 150 unique param configs
     seen_configs = set()
@@ -359,7 +362,7 @@ def main():
                 'class_weight': cfg[6],
                 'oversample': cfg[7],
                 'training_target': cfg[8],
-                'threshold': cfg[9],
+                'threshold': cfg[9]
             })
             
     print(f"\nCreated hyperparameter search space with {len(param_grid)} configurations.")
@@ -489,7 +492,7 @@ def main():
         mean_kappa = (avg_k_r1 + avg_k_r2) / 2.0 if not np.isnan(avg_k_r2) else avg_k_r1
         mean_ac1 = (avg_a_r1 + avg_a_r2) / 2.0 if not np.isnan(avg_a_r2) else avg_a_r1
         
-        # Overall optimization score
+        # Overall optimization score (Targeting Cohen's Kappa and AC1)
         score = (mean_kappa + mean_ac1) / 2.0
         
         results.append({
@@ -506,9 +509,9 @@ def main():
         if score > best_score:
             best_score = score
             best_config = params
-            print(f"[{run_i+1}/{len(param_grid)}] NEW BEST! Score: {score:.4f} (Kappa: {mean_kappa:.4f}, AC1: {mean_ac1:.4f}) | Offset: {offset}ms | Features: {fset_name}")
+            print(f"[{run_i+1}/{len(param_grid)}] NEW BEST! Score (Kappa): {score:.4f} (AC1: {mean_ac1:.4f}) | Offset: {offset}ms | Features: {fset_name}")
         elif (run_i + 1) % 15 == 0:
-            print(f"[{run_i+1}/{len(param_grid)}] Current Best Score: {best_score:.4f}")
+            print(f"[{run_i+1}/{len(param_grid)}] Current Best Cohen's Kappa: {best_score:.4f}")
             
     # Compile results into df
     results_df = pd.DataFrame(results)
@@ -555,12 +558,18 @@ def main():
         y_s_r2 = all_y_r2[subj]
         
         if best_config['training_target'] == 'consensus' and y_s_r2 is not None:
+            n = min(len(X_s), len(y_s_r1), len(y_s_r2))
+            X_s, y_s_r1, y_s_r2 = X_s[:n], y_s_r1[:n], y_s_r2[:n]
+            
             valid = ~np.isnan(y_s_r1.astype(float)) & ~np.isnan(y_s_r2.astype(float))
             agree = (y_s_r1 == y_s_r2) & valid
             if agree.sum() > 0:
                 X_train_list.append(X_s[agree])
                 y_train_list.append(y_s_r1[agree])
         else:
+            n = min(len(X_s), len(y_s_r1))
+            X_s, y_s_r1 = X_s[:n], y_s_r1[:n]
+            
             valid = ~np.isnan(y_s_r1.astype(float))
             if valid.sum() > 0:
                 X_train_list.append(X_s[valid])

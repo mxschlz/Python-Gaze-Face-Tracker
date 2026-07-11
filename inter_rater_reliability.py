@@ -1,6 +1,7 @@
 import pandas as pd
 from sklearn.metrics import cohen_kappa_score, confusion_matrix
 import os
+import numpy as np
 
 
 def calculate_cohens_kappa(file_path1, file_path2, column_index1=0, column_index2=0, labels=[1, 2]):
@@ -97,8 +98,21 @@ def calculate_cohens_kappa(file_path1, file_path2, column_index1=0, column_index
         observed_agreement_count = agreement_both_l1 + agreement_both_l2
         observed_agreement_proportion = observed_agreement_count / total_observations if total_observations > 0 else 0
 
+        # Gwet's AC1 calculation
+        po = observed_agreement_proportion
+        p_label1_r1 = np.mean(rater1_data == label1)
+        p_label1_r2 = np.mean(rater2_data == label1)
+        pi1 = (p_label1_r1 + p_label1_r2) / 2.0
+        pe = 2.0 * pi1 * (1.0 - pi1)
+        
+        if pe >= 1.0:
+            gwet_ac1 = 1.0
+        else:
+            gwet_ac1 = (po - pe) / (1.0 - pe)
+
         summary = {
             "cohen_kappa": kappa,
+            "gwet_ac1": gwet_ac1,
             "total_observations": total_observations,
             f"agreement_both_{label1}": agreement_both_l1,
             f"agreement_both_{label2}": agreement_both_l2,

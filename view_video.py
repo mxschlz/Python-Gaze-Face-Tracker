@@ -62,13 +62,13 @@ def main():
     if len(sys.argv) > 1:
         arg_path = sys.argv[1]
         if os.path.isdir(arg_path):
-            video_list = glob.glob(os.path.join(arg_path, "*.mp4"))
+            video_list = glob.glob(os.path.join(arg_path, "*_Video_ML_predictions.mp4"))
         elif os.path.isfile(arg_path):
             video_list = [arg_path]
     else:
         # Search for videos in example_output and example_videos
         for search_dir in ["example_output", "example_videos"]:
-            video_list = glob.glob(os.path.join(search_dir, "*.mp4"))
+            video_list = glob.glob(os.path.join(search_dir, "*_Video_ML_predictions.mp4"))
             if video_list:
                 break
                 

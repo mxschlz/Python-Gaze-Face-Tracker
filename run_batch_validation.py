@@ -121,7 +121,7 @@ def process_single_video_task(args):
             labels=[1, 2]
         )
         
-        kappa_2, agreement_2 = None, None
+        kappa_2, agreement_2, ac1_2 = None, None, None
         if os.path.exists(rater2_file):
             kappa_2, summary_2 = calculate_cohens_kappa(
                 file_path1=rater2_file,
@@ -132,23 +132,29 @@ def process_single_video_task(args):
             )
             if summary_2:
                 agreement_2 = summary_2.get("observed_agreement_proportion", 0)
+                ac1_2 = summary_2.get("gwet_ac1", None)
         
         if kappa_1 is not None and summary_1 is not None:
             agreement_1 = summary_1.get("observed_agreement_proportion", 0)
+            ac1_1 = summary_1.get("gwet_ac1", None)
             mean_kappa = (kappa_1 + kappa_2) / 2.0 if kappa_2 is not None else kappa_1
+            mean_ac1 = (ac1_1 + ac1_2) / 2.0 if ac1_2 is not None else ac1_1
             
             return {
                 "status": "success",
                 "subject": subject_sess,
                 "trials": summary_1.get("total_observations", 0),
                 "rater1_kappa": kappa_1,
+                "rater1_ac1": ac1_1,
                 "rater1_agreement": agreement_1,
                 "rater2_kappa": kappa_2 if kappa_2 is not None else "N/A",
+                "rater2_ac1": ac1_2 if ac1_2 is not None else "N/A",
                 "rater2_agreement": agreement_2 if agreement_2 is not None else "N/A",
-                "mean_kappa": mean_kappa
+                "mean_kappa": mean_kappa,
+                "mean_ac1": mean_ac1
             }
         else:
-            return {"status": "error", "message": f"Could not calculate Kappa for {subject_sess}"}
+            return {"status": "error", "message": f"Could not calculate metrics for {subject_sess}"}
             
     except Exception as e:
         import traceback
@@ -161,10 +167,10 @@ def run_validation():
     print("           OCAPI PARALLEL BATCH VALIDATION PIPELINE")
     print("=" * 80)
     
-    video_dir = "/home/max/Insync/schulz.max5@gmail.com/GoogleDrive/PhD/data/OCAPI/all_videos_combined"
-    eeg_base_dir = "/home/max/Insync/schulz.max5@gmail.com/GoogleDrive/PhD/data/OCAPI/input"
-    rater_1_dir = "/home/max/Insync/schulz.max5@gmail.com/GoogleDrive/PhD/data/OCAPI/output/human_coding/rater_1"
-    rater_2_dir = "/home/max/Insync/schulz.max5@gmail.com/GoogleDrive/PhD/data/OCAPI/output/human_coding/rater_2"
+    video_dir = "/home/maxschulz/IPSY1-Storage/Projects/ac/Experiments/running_studies/OCAPI/all_videos_combined"
+    eeg_base_dir = "/home/maxschulz/IPSY1-Storage/Projects/ac/Experiments/running_studies/OCAPI/input"
+    rater_1_dir = "/home/maxschulz/IPSY1-Storage/Projects/ac/Experiments/running_studies/OCAPI/output/human_coding/rater_1"
+    rater_2_dir = "/home/maxschulz/IPSY1-Storage/Projects/ac/Experiments/running_studies/OCAPI/output/human_coding/rater_2"
     output_log_dir = os.path.join(project_root, "validation_logs")
     os.makedirs(output_log_dir, exist_ok=True)
     
@@ -174,7 +180,7 @@ def run_validation():
         video_files.extend(glob.glob(os.path.join(video_dir, f"*{ext}")))
     
     target_subjects = None
-    force_rerun = False
+    force_rerun = True
     
     if target_subjects:
         video_files = [f for f in video_files if any(sub in os.path.basename(f) for sub in target_subjects)]
@@ -213,7 +219,7 @@ def run_validation():
         ))
         
     results = []
-    max_workers = 2 # Process 2 videos concurrently to speed up while keeping RAM low and safe
+    max_workers = 4 # Process 4 videos concurrently to speed up while keeping RAM low and safe
     
     print(f"Starting execution with {max_workers} processes...")
     
@@ -230,7 +236,7 @@ def run_validation():
             try:
                 res = future.result()
                 if res["status"] == "success":
-                    print(f"[{completed}/{len(filtered_video_files)}] SUCCESS: {res['subject']} | Mean Kappa: {res['mean_kappa']:.4f}")
+                    print(f"[{completed}/{len(filtered_video_files)}] SUCCESS: {res['subject']} | Mean Kappa: {res['mean_kappa']:.4f} | Mean AC1: {res['mean_ac1']:.4f}")
                     results.append(res)
                 elif res["status"] == "skipped":
                     print(f"[{completed}/{len(filtered_video_files)}] SKIPPED: {base_name} ({res['message']})")
@@ -252,7 +258,9 @@ def run_validation():
         print(f"\nDetailed summary saved to: {summary_csv_path}")
         
         overall_mean_kappa = df_results["mean_kappa"].mean()
+        overall_mean_ac1 = df_results["mean_ac1"].mean()
         print(f"\nOverall Average Cohen's Kappa across all processed subjects: {overall_mean_kappa:.4f}")
+        print(f"Overall Average Gwet's AC1 across all processed subjects:    {overall_mean_ac1:.4f}")
     else:
         print("No subjects were successfully validated.")
     print("=" * 80)

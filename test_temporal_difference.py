@@ -17,8 +17,8 @@ def run_test():
     print("=" * 80)
 
     # Path configuration
-    video_dir = "/home/max/Insync/schulz.max5@gmail.com/GoogleDrive/PhD/data/OCAPI/all_videos_combined"
-    eeg_base_dir = "/home/max/Insync/schulz.max5@gmail.com/GoogleDrive/PhD/data/OCAPI/input"
+    video_dir = "/home/maxschulz/IPSY1-Storage/Projects/ac/Experiments/running_studies/OCAPI/all_videos_combined"
+    eeg_base_dir = "/home/maxschulz/IPSY1-Storage/Projects/ac/Experiments/running_studies/OCAPI/input"
     subject_id = "SCS062"
     session = "A"
     subject_sess = f"{subject_id}_{session}"
