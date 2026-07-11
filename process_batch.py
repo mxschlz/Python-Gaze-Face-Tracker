@@ -3,9 +3,10 @@ import argparse
 import os
 import pathlib
 import sys
+import yaml
 
 
-def process_batch(input_folder, output_folder, config_file, demo=False):
+def process_batch(input_folder, output_folder, config_file, onsets_file=None, demo=False):
 	"""
 	This function contains the core video processing logic.
 	It's called only when the script is running inside the target conda environment.
@@ -36,6 +37,13 @@ def process_batch(input_folder, output_folder, config_file, demo=False):
 	# --- New: Lists to track successes and failures ---
 	successful_files = []
 	failed_files = []
+
+	# --- Load Custom Onsets ---
+	custom_onsets = {}
+	if onsets_file and os.path.isfile(onsets_file):
+		with open(onsets_file, 'r') as f:
+			custom_onsets = yaml.safe_load(f) or {}
+		print(f"Loaded custom onsets for {len(custom_onsets)} videos.")
 
 	input_path = pathlib.Path(input_folder)
 	print(f"Scanning for videos in: {input_folder}")
@@ -99,6 +107,10 @@ def process_batch(input_folder, output_folder, config_file, demo=False):
 		print(f"  Output video will be: {video_output_path}")
 		print(f"  Log folder will be: {tracking_data_log_folder}")
 
+		start_ms = custom_onsets.get(base_name, 0)
+		if start_ms > 0:
+			print(f"  -> Custom start time found: Skipping first {start_ms}ms")
+
 		try:
 			tracker = Ocapi(
 				subject_id=subject_id,
@@ -108,6 +120,7 @@ def process_batch(input_folder, output_folder, config_file, demo=False):
 				VIDEO_INPUT=video_input_path,
 				VIDEO_OUTPUT=video_output_path,
 				TRACKING_DATA_LOG_FOLDER=tracking_data_log_folder,
+				start_video_at_ms=start_ms
 			)
 
 			# Perform EEG synchronization for each video
@@ -166,8 +179,9 @@ if __name__ == "__main__":
 	parser.add_argument('-i', '--input', required=True, help="Folder containing the input videos (e.g., '.../trimmed/').")
 	parser.add_argument('-o', '--output', required=True, help="Folder to save processed videos and logs.")
 	parser.add_argument('-c', '--config', default="config.yml", help="Path to the configuration file (e.g., 'config.yml').")
+	parser.add_argument('-s', '--onsets', default=None, help="Path to the custom onsets YAML file.")
 	parser.add_argument('-d', '--demo', action='store_true', help="Run in demonstration mode (stop after processing 1 video).")
 
 	args = parser.parse_args()
 
-	process_batch(args.input, args.output, args.config, demo=args.demo)
+	process_batch(args.input, args.output, args.config, onsets_file=args.onsets, demo=args.demo)

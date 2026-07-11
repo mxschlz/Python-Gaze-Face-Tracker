@@ -362,11 +362,12 @@ class DeepLabCutDetector:
 class Ocapi(object):
 	def __init__(self, subject_id=None, config_file_path="config.yaml", VIDEO_INPUT=None, VIDEO_OUTPUT=None, WEBCAM=0,
 	             TRACKING_DATA_LOG_FOLDER=None, starting_timestamp=None, total_frames=None,
-	             eeg_trial_onsets_ms=None, session=None):
+	             eeg_trial_onsets_ms=None, session=None, start_video_at_ms=0):
 
 		# 2. Set up core attributes from arguments
 		self.subject_id = subject_id
 		self.session = session
+		self.START_VIDEO_AT_MS = start_video_at_ms
 		self.VIDEO_INPUT = VIDEO_INPUT
 		self.VIDEO_OUTPUT_BASE = VIDEO_OUTPUT
 		self.TRACKING_DATA_LOG_FOLDER = TRACKING_DATA_LOG_FOLDER
@@ -1023,6 +1024,13 @@ class Ocapi(object):
 		else:
 			raise ValueError("Provide EITHER VIDEO_INPUT OR WEBCAM, not both or neither.")
 		return cap
+
+	def _seek_to_start(self):
+		if getattr(self, 'START_VIDEO_AT_MS', 0) > 0 and self.cap and self.cap.isOpened():
+			target_frame = int((self.START_VIDEO_AT_MS / 1000.0) * self.FPS)
+			self.cap.set(cv.CAP_PROP_POS_FRAMES, target_frame)
+			if self.PRINT_DATA:
+				self.logger.info(f"Seeking video to custom start time: {self.START_VIDEO_AT_MS}ms (Frame {target_frame})")
 
 	def init_video_output(self, part_suffix=""):
 		if getattr(self, 'skip_video_decoding', False): return None
@@ -2598,6 +2606,9 @@ class Ocapi(object):
 			calib_duration_sec = getattr(self, "CLUSTERING_CALIB_DURATION_SECONDS", 30)
 			frame_limit = int(calib_duration_sec * self.FPS)
 
+			self._seek_to_start()
+			start_frame = int((getattr(self, 'START_VIDEO_AT_MS', 0) / 1000.0) * self.FPS) if getattr(self, 'START_VIDEO_AT_MS', 0) > 0 else 0
+
 			# Lists to store eye calibration values
 			eye_calib_l_dx = []
 			eye_calib_r_dx = []
@@ -2611,7 +2622,7 @@ class Ocapi(object):
 					if self.PRINT_DATA: self.logger.info("Video ended before calibration period finished.")
 					break
 
-				self.frame_count = frame_num
+				self.frame_count = start_frame + frame_num
 				landmarks = self.detector.detect(frame)
 
 				if landmarks:
@@ -2749,7 +2760,9 @@ class Ocapi(object):
 		# =================================================================================
 		# --- Main Analysis Loop ---
 		# =================================================================================
-		self.frame_count = -1
+		self._seek_to_start()
+		target_frame = int((getattr(self, 'START_VIDEO_AT_MS', 0) / 1000.0) * self.FPS) if getattr(self, 'START_VIDEO_AT_MS', 0) > 0 else 0
+		self.frame_count = target_frame - 1
 		try:
 			while True:
 				self.frame_count += 1
