@@ -5,7 +5,7 @@ def get_data_path():
   if os.name == 'nt':  # Windows
     data_path = 'G:\\Meine Ablage\\PhD\\data\\OCAPI\\'
   elif os.name == 'posix':  # Linux
-    data_path = '/home/max/Insync/schulz.max5@gmail.com/GoogleDrive/PhD/data/OCAPI/'
+    data_path = '/home/maxschulz/IPSY1-Storage/Projects/ac/Experiments/running_studies/OCAPI/'
   else:
     raise OSError("Unsupported operating system.")
   return data_path
